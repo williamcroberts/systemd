@@ -92,6 +92,8 @@ int tpm2_get_good_pcr_banks_strv(Tpm2Context *c, uint32_t pcr_mask, char ***ret)
 
 int tpm2_extend_bytes(Tpm2Context *c, char **banks, unsigned pcr_index, const void *data, size_t data_size, const void *secret, size_t secret_size);
 
+int tpm2_util_persistent_to_esys_tr(TPM2_HANDLE handle, TPM2B_PUBLIC *public, TPM2B_NAME *name, uint8_t **tr_buf, size_t *size);
+
 #else /* HAVE_TPM2 */
 typedef struct {} Tpm2Context;
 typedef struct {} Tpm2Handle;

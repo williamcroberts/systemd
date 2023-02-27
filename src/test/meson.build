@@ -159,7 +159,6 @@ simple_tests += files(
         'test-time-util.c',
         'test-tmpfile-util.c',
         'test-tmpfiles.c',
-        'test-tpm2.c',
         'test-udev-util.c',
         'test-uid-alloc-range.c',
         'test-uid-range.c',
@@ -218,6 +217,11 @@ tests += [
                 'sources' : files('test-bpf-devices.c'),
                 'dependencies' : common_test_dependencies,
                 'base' : test_core_base,
+        },
+        {
+                'sources' : files('test-tpm2.c'),
+                'dependencies' : tpm2,
+                'type' : 'manual',
         },
         {
                 'sources' : files('test-bpf-firewall.c'),

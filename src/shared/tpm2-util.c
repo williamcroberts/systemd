@@ -54,10 +54,13 @@ TSS2_RC (*sym_Esys_VerifySignature)(ESYS_CONTEXT *esysContext, ESYS_TR keyHandle
 
 const char* (*sym_Tss2_RC_Decode)(TSS2_RC rc) = NULL;
 
+TSS2_RC (*sym_Tss2_MU_TPM2_HANDLE_Marshal)(TPM2_HANDLE in, uint8_t *buffer, size_t size, size_t *offset);
+TSS2_RC (*sym_Tss2_MU_TPM2B_NAME_Marshal)(TPM2B_NAME const *src, uint8_t buffer[], size_t buffer_size, size_t *offset);
 TSS2_RC (*sym_Tss2_MU_TPM2B_PRIVATE_Marshal)(TPM2B_PRIVATE const *src, uint8_t buffer[], size_t buffer_size, size_t *offset) = NULL;
 TSS2_RC (*sym_Tss2_MU_TPM2B_PRIVATE_Unmarshal)(uint8_t const buffer[], size_t buffer_size, size_t *offset, TPM2B_PRIVATE  *dest) = NULL;
 TSS2_RC (*sym_Tss2_MU_TPM2B_PUBLIC_Marshal)(TPM2B_PUBLIC const *src, uint8_t buffer[], size_t buffer_size, size_t *offset) = NULL;
 TSS2_RC (*sym_Tss2_MU_TPM2B_PUBLIC_Unmarshal)(uint8_t const buffer[], size_t buffer_size, size_t *offset, TPM2B_PUBLIC *dest) = NULL;
+TSS2_RC (*sym_Tss2_MU_UINT32_Marshal)(UINT32 src, uint8_t buffer[], size_t buffer_size, size_t *offset);
 
 int dlopen_tpm2(void) {
         int r;
@@ -98,10 +101,13 @@ int dlopen_tpm2(void) {
 
         return dlopen_many_sym_or_warn(
                         &libtss2_mu_dl, "libtss2-mu.so.0", LOG_DEBUG,
+                        DLSYM_ARG(Tss2_MU_TPM2_HANDLE_Marshal),
+                        DLSYM_ARG(Tss2_MU_TPM2B_NAME_Marshal),
                         DLSYM_ARG(Tss2_MU_TPM2B_PRIVATE_Marshal),
                         DLSYM_ARG(Tss2_MU_TPM2B_PRIVATE_Unmarshal),
                         DLSYM_ARG(Tss2_MU_TPM2B_PUBLIC_Marshal),
-                        DLSYM_ARG(Tss2_MU_TPM2B_PUBLIC_Unmarshal));
+                        DLSYM_ARG(Tss2_MU_TPM2B_PUBLIC_Unmarshal),
+                        DLSYM_ARG(Tss2_MU_UINT32_Marshal));
 }
 
 static Tpm2Context *tpm2_context_free(Tpm2Context *c) {
@@ -2508,4 +2514,85 @@ int tpm2_util_pbkdf2_hmac_sha256(const void *pass,
         }
 
         return 0;
+}
+
+int tpm2_util_persistent_to_esys_tr(TPM2_HANDLE handle, TPM2B_PUBLIC *public, TPM2B_NAME *name, uint8_t **tr_buf, size_t *size) {
+
+#define IESYSC_KEY_RSRC 1
+    /*
+     * The format of an ESYS_TR is:
+     * 4 bytes TPM2_HANDLE
+     * TPM2B_NAME
+     * 4 bytes resource type
+     * TPM2B_PUBLIC
+     * Creating an API upstream is tracked here:
+     *   - https://github.com/tpm2-software/tpm2-tss/issues/2575
+     * These are STABLE formats and will not change.
+     *
+     * The interface could be modified to calculate the TPM2B_NAME if desired.
+     */
+
+    /* can only serialize persistent objects */
+    if ((handle >> TPM2_HR_SHIFT) != TPM2_HT_PERSISTENT) {
+        return -EINVAL;
+    }
+
+    /* Step 1 calculate the size */
+    size_t buf_size = SIZE_MAX;
+    size_t offset = 0;
+    void *buffer = NULL;
+    for (unsigned i=0; i < 2; i++) {
+        TSS2_RC rc = sym_Tss2_MU_TPM2_HANDLE_Marshal(
+            handle,
+            buffer,
+            buf_size,
+            &offset);
+        if (rc != TSS2_RC_SUCCESS) {
+                return -EIO;
+        }
+
+        rc = sym_Tss2_MU_TPM2B_NAME_Marshal(
+            name,
+            buffer,
+            buf_size,
+            &offset);
+        if (rc != TSS2_RC_SUCCESS) {
+                return -EIO;
+        }
+
+        rc = sym_Tss2_MU_UINT32_Marshal(
+            IESYSC_KEY_RSRC,
+            buffer,
+            buf_size,
+            &offset);
+        if (rc != TSS2_RC_SUCCESS) {
+                return -EIO;
+        }
+
+        rc = sym_Tss2_MU_TPM2B_PUBLIC_Marshal(
+            public,
+            buffer,
+            buf_size,
+            &offset);
+        if (rc != TSS2_RC_SUCCESS) {
+                return -EIO;
+        }
+        /*
+         * on the first time through allocate the buffer for population on
+         * the next loop
+         */
+        if (i == 0) {
+            buf_size = offset;
+            offset = 0;
+            buffer = calloc(1, buf_size);
+            if (!buffer) {
+                    return -ENOMEM;
+            }
+        }
+    }
+
+    *size = offset;
+    *tr_buf = buffer;
+
+    return 0;
 }
